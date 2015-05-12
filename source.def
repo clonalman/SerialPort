@@ -1,0 +1,6 @@
+LIBRARY "serial"  
+EXPORTS  
+     OpenComm @1  
+     CloseComm @2
+	 WriteComm @3
+	 ReadComm @4  
