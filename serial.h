@@ -29,10 +29,15 @@ SERIAL_API int fnserial(void);
 
 extern "C" 
 {
-	SERIAL_API LPVOID WINAPI OpenComm(LPCSTR lpszPortNum);
+	SERIAL_API LPVOID WINAPI OpenComm(LPCSTR lpszPortNum,
+		DWORD  dwBaudRate = CBR_9600,
+		BYTE   byParity = NOPARITY,
+		BYTE   byStopBits = ONESTOPBIT,
+		BYTE   byByteSize = 8);
+
 	SERIAL_API void WINAPI CloseComm(LPVOID lpComm);
 
-	SERIAL_API DWORD WINAPI WriteComm(LPVOID lpComm, LPCVOID lpData, DWORD dwLen);
-	SERIAL_API DWORD WINAPI ReadComm(LPVOID lpComm, LPVOID lpDest, DWORD dwLen, DWORD dwMaxWait);
+	SERIAL_API DWORD WINAPI WriteComm(LPVOID lpComm, LPCSTR lpData, DWORD dwLen);
+	SERIAL_API DWORD WINAPI ReadComm(LPVOID lpComm, LPSTR lpDest, DWORD dwLen, DWORD dwMaxWait);
 }
 

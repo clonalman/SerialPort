@@ -17,7 +17,7 @@ CSerialPort::CSerialPort(LPCSTR lpszPortNum)
 	CSerialPort::Open(lpszPortNum);
 }
 
-BOOL CSerialPort::Open(LPCSTR lpszPortNum,
+bool CSerialPort::Open(LPCSTR lpszPortNum,
 	DWORD  dwBaudRate,
 	BYTE   byParity,
 	BYTE   byStopBits,
@@ -69,10 +69,37 @@ BOOL CSerialPort::Open(LPCSTR lpszPortNum,
 
 		return FALSE;
 	}
+
+	//设置超时参数，总时间=Multiplier*字符数+Constant   
+	//Interval为读入的字符串中任意两个字符间的最大间隔   
+	COMMTIMEOUTS timeouts = { 0xffffffff, 0, 0, 0, 5000 };
+
+	SetCommTimeouts(m_hComm, &timeouts);
+	SetupComm(m_hComm, 2048, 2048);
+	//清空串口缓冲区,退出所有相关操作   
+	PurgeComm(m_hComm, PURGE_RXCLEAR | PURGE_TXCLEAR | PURGE_RXABORT | PURGE_TXABORT);
+
 	return TRUE;
 }
 
-VOID CSerialPort::Close(VOID)
+void CSerialPort::Clear(void)
+{
+	if (m_hComm > 0)
+	{
+		//清空串口缓冲区,退出所有相关操作   
+		PurgeComm(m_hComm, PURGE_TXABORT | PURGE_RXABORT | PURGE_TXCLEAR | PURGE_RXCLEAR);
+	}
+}
+
+void CSerialPort::Flush(void)
+{
+	if (m_hComm > 0)
+	{
+		FlushFileBuffers(m_hComm);
+	}
+}
+
+void CSerialPort::Close(void)
 {
 	if (m_hComm > 0)
 	{
@@ -90,19 +117,19 @@ DWORD CSerialPort::WriteData(
 	DWORD written = 0;
 
 	if (dwLen < 1)
-		return (0);
+		return 0;
 
 	// create event for overlapped I/O
 	m_ov.hEvent = CreateEvent(NULL,   // pointer to security attributes 
 		FALSE,   // flag for manual-reset event 
-		FALSE,  // flag for initial state 
-		NULL);    // pointer to event-object name 
+		FALSE,   // flag for initial state 
+		NULL);   // pointer to event-object name 
 
 	if (m_ov.hEvent == INVALID_HANDLE_VALUE)
 	{
 		// Handle the error.
 		CSerialPort::ErrorToString("WriteData(): CreateEvent() failed");
-		return (-1);
+		return 0;
 	}
 
 	bSuccess = WriteFile(m_hComm,   // handle to file to write to  
@@ -111,7 +138,7 @@ DWORD CSerialPort::WriteData(
 		&written, // pointer to number of bytes written 
 		&m_ov);   // pointer to structure needed for overlapped I/O
 
-	if (bSuccess)
+	if (!bSuccess)
 	{
 		bSuccess = GetOverlappedResult(m_hComm, &m_ov, &written, TRUE);
 
@@ -128,7 +155,7 @@ DWORD CSerialPort::WriteData(
 		// Handle the error.
 		CloseHandle(m_ov.hEvent);
 		CSerialPort::ErrorToString("WriteData(): WriteFile() failed");
-		return (-1);
+		return 0;
 	}
 	CloseHandle(m_ov.hEvent);
 	return written;
@@ -140,6 +167,7 @@ DWORD CSerialPort::ReadData(
 	DWORD  dwMaxWait)
 {
 	BOOL  bSuccess;
+
 	DWORD result = 0,
 		read = 0, // num read bytes
 		mask = 0; // a 32-bit variable that receives a mask 
@@ -157,7 +185,7 @@ DWORD CSerialPort::ReadData(
 	{
 		// Handle the error.
 		CSerialPort::ErrorToString("ReadData(): CreateEvent() failed");
-		return(-1);
+		return 0;
 	}
 
 	// Specify here the event to be enabled
@@ -167,7 +195,7 @@ DWORD CSerialPort::ReadData(
 		// Handle the error.
 		CloseHandle(m_ov.hEvent);
 		CSerialPort::ErrorToString("ReadData(): SetCommMask() failed");
-		return(-1);
+		return 0;
 	}
 
 	// WaitForSingleObject
@@ -185,10 +213,20 @@ DWORD CSerialPort::ReadData(
 				// Handle the error.
 				CloseHandle(m_ov.hEvent);
 				CSerialPort::ErrorToString("ReadData(): WaitForSingleObject() failed");
-				return(-1);
+				return 0;
 			}
 		}
 	}
+	else
+	{
+		DWORD dwError = 0;
+		COMSTAT ComStat;        //串口状态  
+		//ClearCommError()将更新串口状态结构并清除所有串口硬件错误   
+		ClearCommError(m_hComm, &dwError, &ComStat);
+		if (ComStat.cbInQue == 0)   //输入缓冲队列长为0,无字符   
+			return 0;
+	}
+
 
 	// The specified event occured?
 	if (mask & EV_RXCHAR)
@@ -199,24 +237,29 @@ DWORD CSerialPort::ReadData(
 			&read,  // address of number of bytes read 
 			&m_ov); // address of structure for data 
 
-		if (bSuccess)
+		if (!bSuccess)
 		{
-			bSuccess = GetOverlappedResult(m_hComm, &m_ov, &read, TRUE);
+			int err = GetLastError();
 
-			if (!bSuccess)
+			if (err == ERROR_IO_PENDING)
+			{
+				bSuccess = GetOverlappedResult(m_hComm, &m_ov, &read, TRUE);
+
+				if (!bSuccess)
+				{
+					// Handle the error.
+					CloseHandle(m_ov.hEvent);
+					CSerialPort::ErrorToString("ReadData(): GetOverlappedResult() failed");
+					return 0;
+				}
+			}
+			else
 			{
 				// Handle the error.
 				CloseHandle(m_ov.hEvent);
-				CSerialPort::ErrorToString("WriteData(): GetOverlappedResult() failed");
-				return(-1);
+				CSerialPort::ErrorToString("ReadData(): ReadFile() failed");
+				return 0;
 			}
-		}
-		else
-		{
-			// Handle the error.
-			CloseHandle(m_ov.hEvent);
-			CSerialPort::ErrorToString("ReadData(): ReadFile() failed");
-			return(-1);
 		}
 	}
 	else
@@ -224,14 +267,15 @@ DWORD CSerialPort::ReadData(
 		// Handle the error.
 		CloseHandle(m_ov.hEvent);
 		wsprintf(m_lpszErrorMessage, "Error ReadData(): No EV_RXCHAR occured\n");
-		return(-1);
+		return 0;
 	}
+
 	CloseHandle(m_ov.hEvent);
 	return read;
 }
 
 
-VOID CSerialPort::ErrorToString(LPCSTR lpszMessage)
+void CSerialPort::ErrorToString(LPCSTR lpszMessage)
 {
 	LPVOID lpMessageBuffer;
 	DWORD  error = GetLastError();
